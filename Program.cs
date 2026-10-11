@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Linq;
 using System.Collections.Generic;
@@ -90,6 +90,9 @@ bool restored = false;
 
 try
 {
+    // Загружаем обе языковые модели один раз, до применения профилей.
+    using MenuAutomation menu = new(Path.Combine(AppContext.BaseDirectory, "tessdata"),
+        Path.Combine(outputDirectory, "ocr-native.log"));
     foreach (string name in profileNames)
     {
         cancellation.Token.ThrowIfCancellationRequested();
@@ -114,7 +117,8 @@ try
         Console.WriteLine(name + " profile applied: "
             + profile.Width + " x " + profile.Height);
 
-        string json = RunBenchmark(historyDirectory, cancellation.Token);
+        string json = RunBenchmark(historyDirectory, menu,
+            Path.Combine(outputDirectory, name.ToLowerInvariant() + "-menu"), cancellation.Token);
 
         // Сохраняем родной результат отдельно для каждого прогона.
         File.WriteAllText(Path.Combine(
@@ -151,6 +155,8 @@ finally
     // При ошибке восстановления оставляем резервную копию.
     try
     {
+        if (IsBenchmarkRunning())
+            throw new InvalidOperationException("Benchmark is still running. Close it before restoring the backup.");
         File.WriteAllBytes(settingsPath, originalBytes);
         File.Delete(backupPath);
         restored = true;
@@ -343,7 +349,8 @@ static PreparedProfile PrepareProfile(string template, string name, Screen monit
 }
 
 // Выполняем один прогон. Закрытие процесса происходит даже при отмене или ошибке.
-static string RunBenchmark(string historyDirectory, CancellationToken token)
+static string RunBenchmark(string historyDirectory, MenuAutomation menu,
+    string diagnosticsDirectory, CancellationToken token)
 {
     token.ThrowIfCancellationRequested();
     if (IsBenchmarkRunning())
@@ -393,27 +400,8 @@ static string RunBenchmark(string historyDirectory, CancellationToken token)
     {
         IntPtr retainedHandle = benchmark.Handle;
         Console.WriteLine("Benchmark PID: " + benchmark.Id);
-        Console.WriteLine("Waiting for startup...");
-        // Пока оставляем проверенные 40 секунд загрузки.
-        Pause(40000, token);
-
-        ActivateBenchmark(benchmark);
-        Pause(500, token);
-        SendKeys.SendWait("{ENTER}");
-        Pause(3000, token);
-
-        ActivateBenchmark(benchmark);
-        benchmark.Refresh();
-        Cursor.Position = BenchmarkWindow.GetMenuPoint(
-            benchmark.MainWindowHandle, 0.12, 0.46);
-        Pause(500, token);
-        SendKeys.SendWait("{ENTER}");
-        Pause(3000, token);
-
-        ActivateBenchmark(benchmark);
-        Pause(500, token);
-        SendKeys.SendWait("{ENTER}");
-        Console.WriteLine("Start commands sent. Waiting for a new result...");
+        menu.StartBenchmark(benchmark, diagnosticsDirectory, token);
+        Console.WriteLine("Waiting for a new result...");
 
         Stopwatch wait = Stopwatch.StartNew();
         while (wait.Elapsed.TotalMinutes < 10)
@@ -468,13 +456,6 @@ static string RunBenchmark(string historyDirectory, CancellationToken token)
             benchmark.Dispose();
         }
     }
-}
-
-static void ActivateBenchmark(Process benchmark)
-{
-    if (benchmark.HasExited)
-        throw new InvalidOperationException("Benchmark exited: " + benchmark.ExitCode);
-    Interaction.AppActivate(benchmark.Id);
 }
 
 // Пауза прерывается по Ctrl+C, затем выполняются finally.
