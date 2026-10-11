@@ -1,0 +1,7 @@
+bin/
+obj/
+results/
+.vscode/
+.vs/
+*.backup
+original.ini
