@@ -171,8 +171,8 @@ finally
     }
 }
 
-string reportPath = Path.Combine(outputDirectory, "report.txt");
-WriteReport(reportPath, results, restored, failure);
+BenchmarkReport.Write(outputDirectory, results, restored, failure);
+string reportPath = Path.Combine(outputDirectory, "report.html");
 Console.WriteLine("Report: " + reportPath);
 
 // Для найденных процессов используем снимок потоков, без открытия handle.
@@ -470,67 +470,7 @@ static string GetValue(JsonElement root, string key)
     return root.TryGetProperty(key, out JsonElement value) ? value.ToString() : "not reported";
 }
 
-// Аппаратные данные и фактические настройки берём из родных результатов.
-static void WriteReport(string path, List<RunResult> results, bool restored, string? failure)
-{
-    StringBuilder report = new();
-    report.AppendLine("Black Myth Wukong benchmark automation");
-    report.AppendLine("Date: " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
-    report.AppendLine("Status: " + (results.Count == 2 && restored && failure == null
-        ? "Completed" : "Incomplete"));
-    report.AppendLine("Original settings restored: " + restored);
-    if (failure != null)
-        report.AppendLine("Error: " + failure);
-
-    if (results.Count > 0)
-    {
-        using JsonDocument hardware = JsonDocument.Parse(results[0].Json);
-        report.AppendLine();
-        report.AppendLine("CPU: " + GetValue(hardware.RootElement, "CPUModel"));
-        report.AppendLine("GPU: " + GetValue(hardware.RootElement, "GPUModel"));
-        report.AppendLine("RAM: " + GetValue(hardware.RootElement, "SysMem"));
-        report.AppendLine("GPU driver: " + GetValue(hardware.RootElement, "GpuDriverVer"));
-    }
-
-    foreach (RunResult run in results)
-    {
-        using JsonDocument document = JsonDocument.Parse(run.Json);
-        JsonElement root = document.RootElement;
-        report.AppendLine();
-        report.AppendLine(run.Name + " profile");
-        report.AppendLine("FPS average / minimum / maximum: "
-            + GetValue(root, "FPSAvg") + " / " + GetValue(root, "FPSMin")
-            + " / " + GetValue(root, "FPSMax"));
-        report.AppendLine("FPS, 5th percentile: " + GetValue(root, "FPS95"));
-        report.AppendLine("GPU usage reported by benchmark, %: " + GetValue(root, "GPUAvg"));
-        report.AppendLine("Requested resolution: " + run.Width + " x " + run.Height);
-        report.AppendLine("Actual resolution: " + GetValue(root, "ScreenResolution"));
-
-        string[] keys = { "ScreenMode", "QualityLevel", "ImageQuality",
-            "ViewDistance", "AntiAliasing", "PostProcessing", "ShadowQuality",
-            "TextureQuality", "MaterialQuality", "VegetationQuality",
-            "Dlss", "InsertFrame", "Rtx", "Dx12", "MotionBlur" };
-        foreach (string key in keys)
-            report.AppendLine(key + ": " + GetValue(root, key));
-
-        report.AppendLine("VSync and FPS limiter: disabled in applied INI");
-        report.AppendLine("Applied INI: " + run.AppliedPath);
-
-        // Игра может иначе применить разрешение из шаблона.
-        string actual = Regex.Replace(GetValue(root, "ScreenResolution"), @"\s+", "");
-        if (actual.Replace('×', 'x') != run.Width + "x" + run.Height)
-            report.AppendLine("Note: actual resolution differs from requested resolution.");
-    }
-
-    report.AppendLine();
-    report.AppendLine("CPU profile reduces GPU load; it does not guarantee a CPU bottleneck.");
-    report.AppendLine("Full ray tracing is disabled in both profiles.");
-    report.AppendLine("Native graphics option numbers are preserved from benchmark results.");
-    File.WriteAllText(path, report.ToString(), new UTF8Encoding(false));
-}
-
 record PreparedProfile(string Text, int Width, int Height);
-record RunResult(string Name, string Json, int Width, int Height, string AppliedPath);
 
 // Работа с областью игры без рамки и заголовка окна.
 static class BenchmarkWindow
